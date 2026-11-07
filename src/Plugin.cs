@@ -52,7 +52,7 @@ public class CS2PanelPlugin : BasePlugin
     }
 
     private static List<CCSPlayerController> RealPlayers() =>
-        Utilities.GetPlayers().Where(p => p is { IsValid: true, IsBot: false, IsHLTV: false, Connected: PlayerConnectedState.PlayerConnected }).ToList();
+        Utilities.GetPlayers().Where(p => p is { IsValid: true, IsBot: false, IsHLTV: false }).ToList();
 
     /// <summary>Кому играть: all | me | #userid | часть ника.</summary>
     private static List<CCSPlayerController> Targets(string spec, CCSPlayerController? caller)
