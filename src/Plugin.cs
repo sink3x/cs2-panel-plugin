@@ -23,9 +23,9 @@ public sealed class SoundEntry
 public class CS2PanelPlugin : BasePlugin
 {
     public override string ModuleName => "CS2Panel";
-    public override string ModuleVersion => "0.2.0";
+    public override string ModuleVersion => "0.3.0";
     public override string ModuleAuthor => "sink3x";
-    public override string ModuleDescription => "Звуки и животные по команде и из админ-панели (cs2-yc-sandbox)";
+    public override string ModuleDescription => "Звуки, животные и обновление скинов по команде и из админ-панели (cs2-yc-sandbox)";
 
     // Только то, что безопасно подставить в клиентскую команду «play …»: путь/имя звука без пробелов, кавычек и «;».
     private static readonly Regex SafeSound = new(@"^[A-Za-z0-9_./\-]{1,160}$", RegexOptions.Compiled);
@@ -64,6 +64,7 @@ public class CS2PanelPlugin : BasePlugin
         if (string.IsNullOrWhiteSpace(spec) || spec.Equals("all", StringComparison.OrdinalIgnoreCase)) return all;
         if (spec.Equals("me", StringComparison.OrdinalIgnoreCase)) return caller is { IsValid: true } ? new() { caller } : new();
         if (spec.StartsWith('#') && int.TryParse(spec.AsSpan(1), out var uid)) return all.Where(p => p.UserId == uid).ToList();
+        if (spec.Length == 17 && ulong.TryParse(spec, out var sid)) return all.Where(p => p.SteamID == sid).ToList();
         return all.Where(p => p.PlayerName.Contains(spec, StringComparison.OrdinalIgnoreCase)).ToList();
     }
 
@@ -108,6 +109,20 @@ public class CS2PanelPlugin : BasePlugin
     {
         var lib = ReadLibrary();
         Reply(caller, lib.Count == 0 ? "Библиотека пуста: добавьте звуки в админ-панели (страница «Звуки»)" : "Звуки: " + string.Join(", ", lib.Keys.Take(40)));
+    }
+
+    // ---- скины ----------------------------------------------------------------------------------------------------
+    // WeaponPaints читает базу при заходе игрока и по его команде !wp. Панель пишет скины в базу и просит плагин нажать !wp за игрока,
+    // чтобы изменения применились сразу, без перезахода. (Если в WeaponPaints.json большая CmdRefreshCooldownSeconds, повтор раньше срока он отклонит.)
+    [ConsoleCommand("css_refreshskins", "Применить скины из базы сразу (!wp за игрока): css_refreshskins [all|me|#userid|steamid64|ник]")]
+    [CommandHelper(whoCanExecute: CommandUsage.CLIENT_AND_SERVER)]
+    [RequiresPermissions("@css/generic")]
+    public void OnRefreshSkins(CCSPlayerController? caller, CommandInfo command)
+    {
+        var list = Targets(command.ArgCount > 1 ? command.GetArg(1) : "all", caller);
+        if (list.Count == 0) { Reply(caller, "Нет подходящих игроков"); return; }
+        foreach (var p in list) p.ExecuteClientCommandFromServer("css_wp");
+        Reply(caller, $"Скины обновлены: {list.Count} игр.");
     }
 
     // ---- животные -------------------------------------------------------------------------------------------------
