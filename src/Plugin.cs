@@ -8,6 +8,7 @@ using CounterStrikeSharp.API.Core.Attributes;
 using CounterStrikeSharp.API.Core.Attributes.Registration;
 using CounterStrikeSharp.API.Modules.Admin;
 using CounterStrikeSharp.API.Modules.Commands;
+using CounterStrikeSharp.API.Modules.Menu;
 using CounterStrikeSharp.API.Modules.Utils;
 
 namespace CS2Panel;
@@ -23,9 +24,9 @@ public sealed class SoundEntry
 public class CS2PanelPlugin : BasePlugin
 {
     public override string ModuleName => "CS2Panel";
-    public override string ModuleVersion => "0.3.0";
+    public override string ModuleVersion => "0.4.0";
     public override string ModuleAuthor => "sink3x";
-    public override string ModuleDescription => "Звуки, животные и обновление скинов по команде и из админ-панели (cs2-yc-sandbox)";
+    public override string ModuleDescription => "Звуки, животные, обновление скинов и меню !menu (cs2-yc-sandbox)";
 
     // Только то, что безопасно подставить в клиентскую команду «play …»: путь/имя звука без пробелов, кавычек и «;».
     private static readonly Regex SafeSound = new(@"^[A-Za-z0-9_./\-]{1,160}$", RegexOptions.Compiled);
@@ -123,6 +124,46 @@ public class CS2PanelPlugin : BasePlugin
         if (list.Count == 0) { Reply(caller, "Нет подходящих игроков"); return; }
         foreach (var p in list) p.ExecuteClientCommandFromServer("css_wp");
         Reply(caller, $"Скины обновлены: {list.Count} игр.");
+    }
+
+    // ---- меню в чате ----------------------------------------------------------------------------------------------
+    // !menu → чат-меню (пункты выбираются цифрами). Каждому игроку: обновить скины. Админам: звуки (@css/generic), животные (@css/cheats).
+    // Действия выполняются теми же консольными командами плагина, права проверяются здесь при открытии меню.
+    private static bool Has(CCSPlayerController p, string flag) => AdminManager.PlayerHasPermissions(p, flag);
+
+    [ConsoleCommand("css_menu", "Меню сервера в чате: !menu")]
+    [CommandHelper(whoCanExecute: CommandUsage.CLIENT_ONLY)]
+    public void OnMenu(CCSPlayerController? caller, CommandInfo command)
+    {
+        if (caller is not { IsValid: true }) return;
+        var menu = new ChatMenu("Меню сервера");
+        menu.AddMenuOption("Применить мои скины (!wp)", (p, _) => p.ExecuteClientCommandFromServer("css_wp"));
+        if (Has(caller, "@css/generic")) menu.AddMenuOption("Звуки…", (p, _) => OpenSoundsMenu(p));
+        if (Has(caller, "@css/cheats")) menu.AddMenuOption("Животные…", (p, _) => OpenAnimalsMenu(p));
+        MenuManager.OpenChatMenu(caller, menu);
+    }
+
+    private void OpenSoundsMenu(CCSPlayerController caller)
+    {
+        if (!Has(caller, "@css/generic")) return;
+        var lib = ReadLibrary().Keys.Where(k => SafeSound.IsMatch(k)).Take(8).ToList();
+        if (lib.Count == 0) { Reply(caller, "Библиотека звуков пуста (страница «Звуки» в админ-панели)"); return; }
+        var menu = new ChatMenu("Звук для всех");
+        foreach (var name in lib) menu.AddMenuOption(name, (p, _) => { if (Has(p, "@css/generic")) Server.ExecuteCommand($"css_playsound {name} all"); });
+        MenuManager.OpenChatMenu(caller, menu);
+    }
+
+    private void OpenAnimalsMenu(CCSPlayerController caller)
+    {
+        if (!Has(caller, "@css/cheats")) return;
+        var menu = new ChatMenu("Животные рядом с вами");
+        foreach (var (kind, label) in new[] { ("chicken", "Курицы ×5"), ("pig", "Свиньи ×3"), ("cow", "Корова ×1") })
+        {
+            var n = kind == "chicken" ? 5 : kind == "pig" ? 3 : 1;
+            menu.AddMenuOption(label, (p, _) => { if (Has(p, "@css/cheats")) Server.ExecuteCommand($"css_spawnanimal {kind} {n} #{p.UserId}"); });
+        }
+        menu.AddMenuOption("Убрать всех", (p, _) => { if (Has(p, "@css/cheats")) Server.ExecuteCommand("css_killanimals"); });
+        MenuManager.OpenChatMenu(caller, menu);
     }
 
     // ---- животные -------------------------------------------------------------------------------------------------
