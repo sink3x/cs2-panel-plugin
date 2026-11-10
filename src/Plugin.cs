@@ -24,7 +24,7 @@ public sealed class SoundEntry
 public class CS2PanelPlugin : BasePlugin
 {
     public override string ModuleName => "CS2Panel";
-    public override string ModuleVersion => "0.4.0";
+    public override string ModuleVersion => "0.5.0";
     public override string ModuleAuthor => "sink3x";
     public override string ModuleDescription => "Звуки, животные, обновление скинов и меню !menu (cs2-yc-sandbox)";
 
@@ -140,6 +140,7 @@ public class CS2PanelPlugin : BasePlugin
         menu.AddMenuOption("Применить мои скины (!wp)", (p, _) => p.ExecuteClientCommandFromServer("css_wp"));
         if (Has(caller, "@css/generic")) menu.AddMenuOption("Звуки…", (p, _) => OpenSoundsMenu(p));
         if (Has(caller, "@css/cheats")) menu.AddMenuOption("Животные…", (p, _) => OpenAnimalsMenu(p));
+        if (Has(caller, "@css/cheats")) menu.AddMenuOption("Очистить карту от гранат и хлама", (p, _) => { if (Has(p, "@css/cheats")) Server.ExecuteCommand("css_cleanup all"); });
         MenuManager.OpenChatMenu(caller, menu);
     }
 
@@ -164,6 +165,43 @@ public class CS2PanelPlugin : BasePlugin
         }
         menu.AddMenuOption("Убрать всех", (p, _) => { if (Has(p, "@css/cheats")) Server.ExecuteCommand("css_killanimals"); });
         MenuManager.OpenChatMenu(caller, menu);
+    }
+
+    // ---- очистка карты --------------------------------------------------------------------------------------------
+    // Гранаты и дымы (летящие и уже сработавшие), огонь молотовов, оружие на полу, следы пуль и спреи.
+    // Следы пуль и спреи рисует КЛИЕНТ, сервер их убрать не может — просим у игроков r_cleardecals (если клиент разрешит).
+    private static readonly string[] Projectiles = { "smokegrenade_projectile", "hegrenade_projectile", "flashbang_projectile", "molotov_projectile", "incendiarygrenade_projectile", "decoy_projectile" };
+
+    private static int RemoveAll<T>(string designer, Func<T, bool>? filter = null) where T : CBaseEntity
+    {
+        var n = 0;
+        foreach (var e in Utilities.FindAllEntitiesByDesignerName<T>(designer).ToList())
+        {
+            if (!e.IsValid || (filter != null && !filter(e))) continue;
+            e.Remove(); n++;
+        }
+        return n;
+    }
+
+    [ConsoleCommand("css_cleanup", "Очистка карты: css_cleanup [grenades|fire|weapons|decals|all]")]
+    [CommandHelper(whoCanExecute: CommandUsage.CLIENT_AND_SERVER)]
+    [RequiresPermissions("@css/cheats")]
+    public void OnCleanup(CCSPlayerController? caller, CommandInfo command)
+    {
+        var what = (command.ArgCount > 1 ? command.GetArg(1) : "all").ToLowerInvariant();
+        if (what is not ("grenades" or "fire" or "weapons" or "decals" or "all")) { Reply(caller, "Доступно: grenades, fire, weapons, decals, all"); return; }
+        var all = what == "all"; var parts = new List<string>();
+        if (all || what == "grenades") { var n = 0; foreach (var d in Projectiles) n += RemoveAll<CBaseEntity>(d); parts.Add($"гранат и дымов: {n}"); }
+        if (all || what == "fire") parts.Add($"огня: {RemoveAll<CBaseEntity>("inferno")}");
+        if (all || what == "weapons")
+            parts.Add($"оружия на полу: {RemoveAll<CCSWeaponBase>("weapon_", w => w.OwnerEntity.Value == null && !w.DesignerName.Equals("weapon_c4", StringComparison.OrdinalIgnoreCase))}");
+        if (all || what == "decals")
+        {
+            var pl = RealPlayers();
+            foreach (var p in pl) p.ExecuteClientCommandFromServer("r_cleardecals");
+            parts.Add($"следы пуль и спреи: запрос {pl.Count} игрокам");
+        }
+        Reply(caller, "Очистка — " + string.Join(", ", parts));
     }
 
     // ---- животные -------------------------------------------------------------------------------------------------
