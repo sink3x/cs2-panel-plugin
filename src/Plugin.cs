@@ -14,44 +14,14 @@ using CounterStrikeSharp.API.Modules.Utils;
 
 namespace CS2Panel;
 
-/// <summary>Записи библиотеки звуков: имя → что проиграть клиенту командой play.</summary>
-public sealed class SoundEntry
-{
-    public string Play { get; set; } = "";
-    public string Title { get; set; } = "";
-}
-
-/// <summary>Оформление команды: название, логотип (код из файлов игры) и флаг страны.</summary>
-public sealed class TeamLook
-{
-    public string Name { get; set; } = "";
-    public string Logo { get; set; } = "";
-    public string Flag { get; set; } = "";
-}
-
-/// <summary>Оформление игрока: клан-тег и (необязательно) ник на сервере.</summary>
-public sealed class PlayerLook
-{
-    public string Tag { get; set; } = "";
-    public string Name { get; set; } = "";
-}
-
-public sealed class Identity
-{
-    public Dictionary<string, TeamLook> Teams { get; set; } = new();
-    public Dictionary<string, PlayerLook> Players { get; set; } = new();
-}
-
 [MinimumApiVersion(200)]
 public class CS2PanelPlugin : BasePlugin
 {
     public override string ModuleName => "CS2Panel";
     public override string ModuleVersion => "0.6.0";
     public override string ModuleAuthor => "sink3x";
-    public override string ModuleDescription => "Звуки, животные, скины, меню !menu, названия команд и клан-теги (cs2-yc-sandbox)";
+    public override string ModuleDescription => "Panel companion: in-game !menu, sounds, team names/logos, clan tags, animals, map cleanup (cs2-yc-sandbox)";
 
-    // Только то, что безопасно подставить в клиентскую команду «play …»: путь/имя звука без пробелов, кавычек и «;».
-    private static readonly Regex SafeSound = new(@"^[A-Za-z0-9_./\-]{1,160}$", RegexOptions.Compiled);
     private const double CooldownSeconds = 2.0;
     private DateTime _lastPlay = DateTime.MinValue;
 
@@ -72,23 +42,11 @@ public class CS2PanelPlugin : BasePlugin
     // свою картинку сервер игрокам показать не может, клиент рисует только то, что у него уже есть.
     private Identity _identity = new();
     private string IdentityFile => Path.Combine(Server.GameDirectory, "csgo", "addons", "counterstrikesharp", "configs", "plugins", "CS2Panel", "identity.json");
-    private static readonly Regex SafeText = new(@"^[^""\\;\r\n\x00-\x1f]{0,32}$", RegexOptions.Compiled);
-    private static readonly Regex SafeLogo = new(@"^[A-Za-z0-9_]{0,24}$", RegexOptions.Compiled);
-    private static readonly Regex SafeFlag = new(@"^[A-Za-z]{0,2}$", RegexOptions.Compiled);
 
     private Identity ReadIdentity()
     {
-        try
-        {
-            if (!File.Exists(IdentityFile)) return new();
-            var opt = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
-            return JsonSerializer.Deserialize<Identity>(File.ReadAllText(IdentityFile), opt) ?? new();
-        }
-        catch (Exception e)
-        {
-            Console.WriteLine($"[CS2Panel] cannot read identity.json: {e.Message}");
-            return new();
-        }
+        try { return File.Exists(IdentityFile) ? ConfigReader.ParseIdentity(File.ReadAllText(IdentityFile)) : new(); }
+        catch (IOException e) { Console.WriteLine($"[CS2Panel] cannot read identity.json: {e.Message}"); return new(); }
     }
 
     private void ApplyTeams()
@@ -97,7 +55,7 @@ public class CS2PanelPlugin : BasePlugin
         foreach (var (key, n) in new[] { ("ct", 1), ("t", 2) })
         {
             var t = _identity.Teams.TryGetValue(key, out var look) ? look : new TeamLook();
-            if (!SafeText.IsMatch(t.Name ?? "") || !SafeLogo.IsMatch(t.Logo ?? "") || !SafeFlag.IsMatch(t.Flag ?? "")) continue;
+            if (!Validation.IsSafeText(t.Name) || !Validation.IsSafeLogo(t.Logo) || !Validation.IsSafeFlag(t.Flag)) continue;
             Server.ExecuteCommand($"mp_teamname_{n} \"{t.Name}\"");
             Server.ExecuteCommand($"mp_teamlogo_{n} \"{t.Logo}\"");
             Server.ExecuteCommand($"mp_teamflag_{n} \"{(t.Flag ?? "").ToUpperInvariant()}\"");
@@ -109,11 +67,11 @@ public class CS2PanelPlugin : BasePlugin
         if (p is not { IsValid: true, IsBot: false, IsHLTV: false }) return false;
         if (!_identity.Players.TryGetValue(p.SteamID.ToString(), out var look)) return false;
         var changed = false;
-        if (SafeText.IsMatch(look.Tag ?? "") && !string.IsNullOrEmpty(look.Tag) && p.Clan != look.Tag)
+        if (Validation.IsSafeText(look.Tag) && !string.IsNullOrEmpty(look.Tag) && p.Clan != look.Tag)
         {
             p.Clan = look.Tag; Utilities.SetStateChanged(p, "CCSPlayerController", "m_szClan"); changed = true;
         }
-        if (SafeText.IsMatch(look.Name ?? "") && !string.IsNullOrWhiteSpace(look.Name) && p.PlayerName != look.Name)
+        if (Validation.IsSafeText(look.Name) && !string.IsNullOrWhiteSpace(look.Name) && p.PlayerName != look.Name)
         {
             p.PlayerName = look.Name; Utilities.SetStateChanged(p, "CBasePlayerController", "m_iszPlayerName"); changed = true;
         }
@@ -153,17 +111,8 @@ public class CS2PanelPlugin : BasePlugin
 
     private Dictionary<string, SoundEntry> ReadLibrary()
     {
-        try
-        {
-            if (!File.Exists(LibraryFile)) return new();
-            var opt = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
-            return JsonSerializer.Deserialize<Dictionary<string, SoundEntry>>(File.ReadAllText(LibraryFile), opt) ?? new();
-        }
-        catch (Exception e)
-        {
-            Console.WriteLine($"[CS2Panel] cannot read sounds.json: {e.Message}");
-            return new();
-        }
+        try { return File.Exists(LibraryFile) ? ConfigReader.ParseLibrary(File.ReadAllText(LibraryFile)) : new(); }
+        catch (IOException e) { Console.WriteLine($"[CS2Panel] cannot read sounds.json: {e.Message}"); return new(); }
     }
 
     private static List<CCSPlayerController> RealPlayers() =>
@@ -173,11 +122,15 @@ public class CS2PanelPlugin : BasePlugin
     private static List<CCSPlayerController> Targets(string spec, CCSPlayerController? caller)
     {
         var all = RealPlayers();
-        if (string.IsNullOrWhiteSpace(spec) || spec.Equals("all", StringComparison.OrdinalIgnoreCase)) return all;
-        if (spec.Equals("me", StringComparison.OrdinalIgnoreCase)) return caller is { IsValid: true } ? new() { caller } : new();
-        if (spec.StartsWith('#') && int.TryParse(spec.AsSpan(1), out var uid)) return all.Where(p => p.UserId == uid).ToList();
-        if (spec.Length == 17 && ulong.TryParse(spec, out var sid)) return all.Where(p => p.SteamID == sid).ToList();
-        return all.Where(p => p.PlayerName.Contains(spec, StringComparison.OrdinalIgnoreCase)).ToList();
+        var t = TargetSpec.Parse(spec);
+        return t.Kind switch
+        {
+            TargetKind.All => all,
+            TargetKind.Me => caller is { IsValid: true } ? new() { caller } : new(),
+            TargetKind.UserId => all.Where(p => p.UserId == t.UserId).ToList(),
+            TargetKind.SteamId => all.Where(p => p.SteamID == t.SteamId).ToList(),
+            _ => all.Where(p => p.PlayerName.Contains(t.Name, StringComparison.OrdinalIgnoreCase)).ToList(),
+        };
     }
 
     private static void Reply(CCSPlayerController? caller, string text)
@@ -195,7 +148,7 @@ public class CS2PanelPlugin : BasePlugin
         var target = command.ArgCount > 2 ? command.GetArg(2) : "all";
         var lib = ReadLibrary();
         var play = lib.TryGetValue(what, out var entry) ? entry.Play : what;
-        if (!SafeSound.IsMatch(play)) { Reply(caller, "Недопустимое имя звука (только буквы, цифры, _ . / -)"); return; }
+        if (!Validation.IsSafeSound(play)) { Reply(caller, "Недопустимое имя звука (только буквы, цифры, _ . / -)"); return; }
         if (caller != null && (DateTime.UtcNow - _lastPlay).TotalSeconds < CooldownSeconds) { Reply(caller, "Слишком часто, подождите пару секунд"); return; }
         var list = Targets(target, caller);
         if (list.Count == 0) { Reply(caller, "Нет подходящих игроков"); return; }
@@ -323,7 +276,7 @@ public class CS2PanelPlugin : BasePlugin
     private void OpenSoundsMenu(CCSPlayerController caller)
     {
         if (!Has(caller, "@css/generic")) return;
-        var lib = ReadLibrary().Where(kv => SafeSound.IsMatch(kv.Key)).Take(30).ToList();
+        var lib = ReadLibrary().Where(kv => Validation.IsSafeSound(kv.Key)).Take(30).ToList();
         if (lib.Count == 0) { Reply(caller, "Библиотека звуков пуста (страница «Звуки» в админ-панели)"); return; }
         var menu = NewMenu("Звук для всех", OpenMainMenu);
         foreach (var kv in lib)
@@ -388,7 +341,6 @@ public class CS2PanelPlugin : BasePlugin
     // ---- животные -------------------------------------------------------------------------------------------------
     // ent_create из RCON не работает: у консоли сервера нет игрока, а животное создаётся «у прицела» вызвавшего. Поэтому создаём сами,
     // рядом с живым игроком. В CS2 есть только курица; «свинья» и «корова» — та же курица, перекрашенная и увеличенная.
-    private const int MaxAnimals = 60;
     private static readonly Dictionary<string, (Color? Color, float Scale)> Animals = new(StringComparer.OrdinalIgnoreCase)
     {
         ["chicken"] = (null, 1f),
@@ -412,15 +364,15 @@ public class CS2PanelPlugin : BasePlugin
     public void OnSpawnAnimal(CCSPlayerController? caller, CommandInfo command)
     {
         var kind = command.ArgCount > 1 ? command.GetArg(1).ToLowerInvariant() : "chicken";
-        if (!Animals.TryGetValue(kind, out var an)) { Reply(caller, "Доступны: chicken, pig, cow"); return; }
+        if (!AnimalRules.IsKnown(kind) || !Animals.TryGetValue(kind, out var an)) { Reply(caller, "Доступны: chicken, pig, cow"); return; }
         var count = 1;
-        if (command.ArgCount > 2 && int.TryParse(command.GetArg(2), out var c)) count = Math.Clamp(c, 1, 30);
+        if (command.ArgCount > 2 && int.TryParse(command.GetArg(2), out var c)) count = AnimalRules.ClampCount(c);
         var spec = command.ArgCount > 3 ? command.GetArg(3) : "auto";
         var pawn = PickPlayer(spec, caller)?.PlayerPawn.Value;
         var origin = pawn?.AbsOrigin;
         if (pawn == null || origin == null) { Reply(caller, "Нет живого игрока: животных создают рядом с игроком (зайдите на сервер и появитесь в игре)"); return; }
         var existing = Utilities.FindAllEntitiesByDesignerName<CBaseEntity>("chicken").Count();
-        if (existing + count > MaxAnimals) { Reply(caller, $"Слишком много животных (на карте {existing}, максимум {MaxAnimals}): уберите лишних командой css_killanimals"); return; }
+        if (!AnimalRules.Fits(existing, count)) { Reply(caller, $"Слишком много животных (на карте {existing}, максимум {AnimalRules.MaxAnimals}): уберите лишних командой css_killanimals"); return; }
 
         var yaw = pawn.EyeAngles.Y * MathF.PI / 180f;
         var made = 0;

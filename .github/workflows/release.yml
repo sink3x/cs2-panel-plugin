@@ -1,0 +1,42 @@
+name: Release
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Tag must match ModuleVersion
+        run: |
+          v="$(grep -oP 'ModuleVersion => "\K[^"]+' src/Plugin.cs)"
+          [ "v$v" = "$GITHUB_REF_NAME" ] || { echo "tag $GITHUB_REF_NAME does not match ModuleVersion $v" >&2; exit 1; }
+      - name: Test
+        run: dotnet test CS2Panel.sln -c Release
+      - name: Build and package
+        run: |
+          dotnet publish src/CS2Panel.csproj -c Release -o out
+          mkdir -p pkg/CS2Panel
+          cp out/CS2Panel.dll pkg/CS2Panel/
+          (cd pkg && zip -r ../CS2Panel.zip CS2Panel)
+          sha256sum CS2Panel.zip > SHA256SUMS
+          cat SHA256SUMS
+      - name: Release notes from CHANGELOG
+        run: |
+          ver="${GITHUB_REF_NAME#v}"
+          awk -v v="$ver" '$0 ~ "^## \\["v"\\]" {p=1; next} /^## \[/ {p=0} p' CHANGELOG.md > notes.md
+          [ -s notes.md ] || echo "Release $GITHUB_REF_NAME" > notes.md
+      - uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: CS2Panel.zip
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" CS2Panel.zip SHA256SUMS --title "$GITHUB_REF_NAME" --notes-file notes.md

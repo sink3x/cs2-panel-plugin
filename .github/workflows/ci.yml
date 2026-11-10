@@ -1,20 +1,21 @@
-name: build
+name: CI
 on:
   push:
     branches: [main]
-    tags: ['v*']
-  workflow_dispatch:
+  pull_request:
 permissions:
-  contents: write
+  contents: read
 jobs:
-  build:
+  test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
-      - name: Build
+      - name: Test
+        run: dotnet test CS2Panel.sln -c Release
+      - name: Build the plugin
         run: dotnet publish src/CS2Panel.csproj -c Release -o out
       - name: Package
         run: |
@@ -22,12 +23,7 @@ jobs:
           cp out/CS2Panel.dll pkg/CS2Panel/
           (cd pkg && zip -r ../CS2Panel.zip CS2Panel)
           unzip -l CS2Panel.zip
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: CS2Panel
           path: CS2Panel.zip
-      - name: Release
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: CS2Panel.zip
