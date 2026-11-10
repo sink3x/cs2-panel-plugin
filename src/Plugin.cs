@@ -9,6 +9,7 @@ using CounterStrikeSharp.API.Core.Attributes.Registration;
 using CounterStrikeSharp.API.Modules.Admin;
 using CounterStrikeSharp.API.Modules.Commands;
 using CounterStrikeSharp.API.Modules.Menu;
+using CounterStrikeSharp.API.Modules.Timers;
 using CounterStrikeSharp.API.Modules.Utils;
 
 namespace CS2Panel;
@@ -20,13 +21,34 @@ public sealed class SoundEntry
     public string Title { get; set; } = "";
 }
 
+/// <summary>Оформление команды: название, логотип (код из файлов игры) и флаг страны.</summary>
+public sealed class TeamLook
+{
+    public string Name { get; set; } = "";
+    public string Logo { get; set; } = "";
+    public string Flag { get; set; } = "";
+}
+
+/// <summary>Оформление игрока: клан-тег и (необязательно) ник на сервере.</summary>
+public sealed class PlayerLook
+{
+    public string Tag { get; set; } = "";
+    public string Name { get; set; } = "";
+}
+
+public sealed class Identity
+{
+    public Dictionary<string, TeamLook> Teams { get; set; } = new();
+    public Dictionary<string, PlayerLook> Players { get; set; } = new();
+}
+
 [MinimumApiVersion(200)]
 public class CS2PanelPlugin : BasePlugin
 {
     public override string ModuleName => "CS2Panel";
-    public override string ModuleVersion => "0.5.0";
+    public override string ModuleVersion => "0.6.0";
     public override string ModuleAuthor => "sink3x";
-    public override string ModuleDescription => "Звуки, животные, обновление скинов и меню !menu (cs2-yc-sandbox)";
+    public override string ModuleDescription => "Звуки, животные, скины, меню !menu, названия команд и клан-теги (cs2-yc-sandbox)";
 
     // Только то, что безопасно подставить в клиентскую команду «play …»: путь/имя звука без пробелов, кавычек и «;».
     private static readonly Regex SafeSound = new(@"^[A-Za-z0-9_./\-]{1,160}$", RegexOptions.Compiled);
@@ -38,6 +60,95 @@ public class CS2PanelPlugin : BasePlugin
     public override void Load(bool hotReload)
     {
         Console.WriteLine($"[CS2Panel] loaded v{ModuleVersion}");
+        _identity = ReadIdentity();
+        RegisterListener<Listeners.OnMapStart>(_ => AddTimer(2.0f, () => { _identity = ReadIdentity(); ApplyTeams(); }));
+        // клиент время от времени возвращает свой клан-тег из Steam: периодически ставим наш заново
+        AddTimer(10.0f, ApplyPlayers, TimerFlags.REPEAT);
+        if (hotReload) { ApplyTeams(); ApplyPlayers(); }
+    }
+
+    // ---- оформление: названия и логотипы команд, клан-теги и ники ------------------------------------------------------
+    // Панель пишет identity.json и вызывает css_identity. Логотип — код команды из файлов игры (navi, faze, vita…):
+    // свою картинку сервер игрокам показать не может, клиент рисует только то, что у него уже есть.
+    private Identity _identity = new();
+    private string IdentityFile => Path.Combine(Server.GameDirectory, "csgo", "addons", "counterstrikesharp", "configs", "plugins", "CS2Panel", "identity.json");
+    private static readonly Regex SafeText = new(@"^[^""\\;\r\n\x00-\x1f]{0,32}$", RegexOptions.Compiled);
+    private static readonly Regex SafeLogo = new(@"^[A-Za-z0-9_]{0,24}$", RegexOptions.Compiled);
+    private static readonly Regex SafeFlag = new(@"^[A-Za-z]{0,2}$", RegexOptions.Compiled);
+
+    private Identity ReadIdentity()
+    {
+        try
+        {
+            if (!File.Exists(IdentityFile)) return new();
+            var opt = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+            return JsonSerializer.Deserialize<Identity>(File.ReadAllText(IdentityFile), opt) ?? new();
+        }
+        catch (Exception e)
+        {
+            Console.WriteLine($"[CS2Panel] cannot read identity.json: {e.Message}");
+            return new();
+        }
+    }
+
+    private void ApplyTeams()
+    {
+        // mp_teamname_1 — CT, mp_teamname_2 — T (так устроена игра)
+        foreach (var (key, n) in new[] { ("ct", 1), ("t", 2) })
+        {
+            var t = _identity.Teams.TryGetValue(key, out var look) ? look : new TeamLook();
+            if (!SafeText.IsMatch(t.Name ?? "") || !SafeLogo.IsMatch(t.Logo ?? "") || !SafeFlag.IsMatch(t.Flag ?? "")) continue;
+            Server.ExecuteCommand($"mp_teamname_{n} \"{t.Name}\"");
+            Server.ExecuteCommand($"mp_teamlogo_{n} \"{t.Logo}\"");
+            Server.ExecuteCommand($"mp_teamflag_{n} \"{(t.Flag ?? "").ToUpperInvariant()}\"");
+        }
+    }
+
+    private bool ApplyPlayer(CCSPlayerController p)
+    {
+        if (p is not { IsValid: true, IsBot: false, IsHLTV: false }) return false;
+        if (!_identity.Players.TryGetValue(p.SteamID.ToString(), out var look)) return false;
+        var changed = false;
+        if (SafeText.IsMatch(look.Tag ?? "") && !string.IsNullOrEmpty(look.Tag) && p.Clan != look.Tag)
+        {
+            p.Clan = look.Tag; Utilities.SetStateChanged(p, "CCSPlayerController", "m_szClan"); changed = true;
+        }
+        if (SafeText.IsMatch(look.Name ?? "") && !string.IsNullOrWhiteSpace(look.Name) && p.PlayerName != look.Name)
+        {
+            p.PlayerName = look.Name; Utilities.SetStateChanged(p, "CBasePlayerController", "m_iszPlayerName"); changed = true;
+        }
+        return changed;
+    }
+
+    private void ApplyPlayers()
+    {
+        var changed = false;
+        foreach (var p in RealPlayers()) changed |= ApplyPlayer(p);
+        // таблица счёта перечитывает теги и ники по этому событию
+        if (changed) new EventNextlevelChanged(false).FireEvent(false);
+    }
+
+    [GameEventHandler]
+    public HookResult OnPlayerConnectFull(EventPlayerConnectFull ev, GameEventInfo info)
+    {
+        AddTimer(1.5f, ApplyPlayers);
+        return HookResult.Continue;
+    }
+
+    [GameEventHandler]
+    public HookResult OnPlayerSpawn(EventPlayerSpawn ev, GameEventInfo info)
+    {
+        AddTimer(0.5f, ApplyPlayers);
+        return HookResult.Continue;
+    }
+
+    [ConsoleCommand("css_identity", "Перечитать identity.json и применить названия команд, клан-теги и ники")]
+    [CommandHelper(whoCanExecute: CommandUsage.SERVER_ONLY)]
+    public void OnIdentity(CCSPlayerController? caller, CommandInfo command)
+    {
+        _identity = ReadIdentity();
+        ApplyTeams(); ApplyPlayers();
+        Reply(caller, $"Оформление применено: игроков с тегом или ником {_identity.Players.Count}");
     }
 
     private Dictionary<string, SoundEntry> ReadLibrary()
@@ -85,7 +196,7 @@ public class CS2PanelPlugin : BasePlugin
         var lib = ReadLibrary();
         var play = lib.TryGetValue(what, out var entry) ? entry.Play : what;
         if (!SafeSound.IsMatch(play)) { Reply(caller, "Недопустимое имя звука (только буквы, цифры, _ . / -)"); return; }
-        if ((DateTime.UtcNow - _lastPlay).TotalSeconds < CooldownSeconds) { Reply(caller, "Слишком часто, подождите пару секунд"); return; }
+        if (caller != null && (DateTime.UtcNow - _lastPlay).TotalSeconds < CooldownSeconds) { Reply(caller, "Слишком часто, подождите пару секунд"); return; }
         var list = Targets(target, caller);
         if (list.Count == 0) { Reply(caller, "Нет подходящих игроков"); return; }
         _lastPlay = DateTime.UtcNow;
@@ -126,45 +237,115 @@ public class CS2PanelPlugin : BasePlugin
         Reply(caller, $"Скины обновлены: {list.Count} игр.");
     }
 
-    // ---- меню в чате ----------------------------------------------------------------------------------------------
-    // !menu → чат-меню (пункты выбираются цифрами). Каждому игроку: обновить скины. Админам: звуки (@css/generic), животные (@css/cheats).
-    // Действия выполняются теми же консольными командами плагина, права проверяются здесь при открытии меню.
+    // ---- меню сервера ---------------------------------------------------------------------------------------------
+    // !menu → меню по центру экрана (пункты выбираются цифрами 1–9). Разделы зависят от прав игрока.
+    // Чужие команды (скины WeaponPaints, тренировка MatchZy) выполняются от имени игрока: права проверяет сам плагин-владелец.
     private static bool Has(CCSPlayerController p, string flag) => AdminManager.PlayerHasPermissions(p, flag);
+    private static readonly (string Map, string Title)[] MenuMaps =
+    {
+        ("de_dust2", "Dust II"), ("de_mirage", "Mirage"), ("de_inferno", "Inferno"), ("de_nuke", "Nuke"), ("de_overpass", "Overpass"),
+        ("de_ancient", "Ancient"), ("de_anubis", "Anubis"), ("de_train", "Train"), ("de_vertigo", "Vertigo"), ("cs_office", "Office"), ("cs_italy", "Italy"),
+    };
 
-    [ConsoleCommand("css_menu", "Меню сервера в чате: !menu")]
+    private CenterHtmlMenu NewMenu(string title, Action<CCSPlayerController>? back)
+    {
+        var menu = new CenterHtmlMenu(title, this);
+        if (back != null) menu.AddMenuOption("← Назад", (p, _) => back(p));
+        return menu;
+    }
+    private void Show(CCSPlayerController p, CenterHtmlMenu menu) { if (p is { IsValid: true }) MenuManager.OpenCenterHtmlMenu(this, p, menu); }
+    private static void Run(CCSPlayerController p, string cmd) { if (p is { IsValid: true }) p.ExecuteClientCommandFromServer(cmd); }
+
+    [ConsoleCommand("css_menu", "Меню сервера: !menu")]
     [CommandHelper(whoCanExecute: CommandUsage.CLIENT_ONLY)]
     public void OnMenu(CCSPlayerController? caller, CommandInfo command)
     {
-        if (caller is not { IsValid: true }) return;
-        var menu = new ChatMenu("Меню сервера");
-        menu.AddMenuOption("Применить мои скины (!wp)", (p, _) => p.ExecuteClientCommandFromServer("css_wp"));
-        if (Has(caller, "@css/generic")) menu.AddMenuOption("Звуки…", (p, _) => OpenSoundsMenu(p));
-        if (Has(caller, "@css/cheats")) menu.AddMenuOption("Животные…", (p, _) => OpenAnimalsMenu(p));
-        if (Has(caller, "@css/cheats")) menu.AddMenuOption("Очистить карту от гранат и хлама", (p, _) => { if (Has(p, "@css/cheats")) Server.ExecuteCommand("css_cleanup all"); });
-        MenuManager.OpenChatMenu(caller, menu);
+        if (caller is { IsValid: true }) OpenMainMenu(caller);
+    }
+
+    private void OpenMainMenu(CCSPlayerController caller)
+    {
+        var menu = NewMenu("Меню сервера", null);
+        menu.AddMenuOption("Скины и внешний вид", (p, _) => OpenSkinsMenu(p));
+        menu.AddMenuOption("Команда", (p, _) => OpenTeamMenu(p));
+        menu.AddMenuOption("Тренировка", (p, _) => OpenPracticeMenu(p));
+        if (Has(caller, "@css/generic")) menu.AddMenuOption("Раунд и боты", (p, _) => OpenRoundMenu(p));
+        if (Has(caller, "@css/changemap")) menu.AddMenuOption("Сменить карту", (p, _) => OpenMapsMenu(p));
+        if (Has(caller, "@css/generic")) menu.AddMenuOption("Звуки", (p, _) => OpenSoundsMenu(p));
+        if (Has(caller, "@css/cheats")) menu.AddMenuOption("Животные и очистка", (p, _) => OpenAnimalsMenu(p));
+        Show(caller, menu);
+    }
+
+    private void OpenSkinsMenu(CCSPlayerController caller)
+    {
+        var menu = NewMenu("Скины и внешний вид", OpenMainMenu);
+        foreach (var (title, cmd) in new[] { ("Скины оружия", "css_skins"), ("Нож", "css_knife"), ("Перчатки", "css_gloves"), ("Агент", "css_agents"), ("Музыка", "css_music"), ("Значок", "css_pins"), ("Применить скины из панели", "css_wp") })
+            menu.AddMenuOption(title, (p, _) => Run(p, cmd));
+        Show(caller, menu);
+    }
+
+    private void OpenTeamMenu(CCSPlayerController caller)
+    {
+        var menu = NewMenu("Команда", OpenMainMenu);
+        menu.AddMenuOption("За спецназ (CT)", (p, _) => p.ChangeTeam(CsTeam.CounterTerrorist));
+        menu.AddMenuOption("За террористов (T)", (p, _) => p.ChangeTeam(CsTeam.Terrorist));
+        menu.AddMenuOption("В наблюдатели", (p, _) => p.ChangeTeam(CsTeam.Spectator));
+        menu.AddMenuOption("Вид от третьего лица", (p, _) => Run(p, "css_tp"));
+        Show(caller, menu);
+    }
+
+    private void OpenPracticeMenu(CCSPlayerController caller)
+    {
+        var menu = NewMenu("Тренировка (MatchZy)", OpenMainMenu);
+        foreach (var (title, cmd) in new[] { ("Включить тренировку", "css_prac"), ("Выйти из тренировки", "css_exitprac"), ("Поставить бота здесь", "css_bot"), ("Убрать ботов", "css_nobots"), ("Повторить бросок гранаты", "css_rethrow"), ("Убрать дымы и огонь", "css_clear"), ("Готов к матчу", "css_ready") })
+            menu.AddMenuOption(title, (p, _) => Run(p, cmd));
+        Show(caller, menu);
+    }
+
+    private void OpenRoundMenu(CCSPlayerController caller)
+    {
+        if (!Has(caller, "@css/generic")) return;
+        var menu = NewMenu("Раунд и боты", OpenMainMenu);
+        foreach (var (title, cmd) in new[] { ("Рестарт раунда", "mp_restartgame 1"), ("Закончить разминку", "mp_warmup_end"), ("Поменять стороны", "mp_swapteams"), ("Бот за CT", "bot_add_ct"), ("Бот за T", "bot_add_t"), ("Убрать ботов", "bot_kick") })
+            menu.AddMenuOption(title, (p, _) => { if (Has(p, "@css/generic")) Server.ExecuteCommand(cmd); });
+        Show(caller, menu);
+    }
+
+    private void OpenMapsMenu(CCSPlayerController caller)
+    {
+        if (!Has(caller, "@css/changemap")) return;
+        var menu = NewMenu("Сменить карту", OpenMainMenu);
+        foreach (var (map, title) in MenuMaps)
+            menu.AddMenuOption(title, (p, _) => { if (Has(p, "@css/changemap")) Server.ExecuteCommand($"changelevel {map}"); });
+        Show(caller, menu);
     }
 
     private void OpenSoundsMenu(CCSPlayerController caller)
     {
         if (!Has(caller, "@css/generic")) return;
-        var lib = ReadLibrary().Keys.Where(k => SafeSound.IsMatch(k)).Take(8).ToList();
+        var lib = ReadLibrary().Where(kv => SafeSound.IsMatch(kv.Key)).Take(30).ToList();
         if (lib.Count == 0) { Reply(caller, "Библиотека звуков пуста (страница «Звуки» в админ-панели)"); return; }
-        var menu = new ChatMenu("Звук для всех");
-        foreach (var name in lib) menu.AddMenuOption(name, (p, _) => { if (Has(p, "@css/generic")) Server.ExecuteCommand($"css_playsound {name} all"); });
-        MenuManager.OpenChatMenu(caller, menu);
+        var menu = NewMenu("Звук для всех", OpenMainMenu);
+        foreach (var kv in lib)
+        {
+            var name = kv.Key;
+            menu.AddMenuOption(string.IsNullOrWhiteSpace(kv.Value.Title) ? name : kv.Value.Title, (p, _) => { if (Has(p, "@css/generic")) Server.ExecuteCommand($"css_playsound {name} all"); });
+        }
+        Show(caller, menu);
     }
 
     private void OpenAnimalsMenu(CCSPlayerController caller)
     {
         if (!Has(caller, "@css/cheats")) return;
-        var menu = new ChatMenu("Животные рядом с вами");
+        var menu = NewMenu("Животные и очистка", OpenMainMenu);
         foreach (var (kind, label) in new[] { ("chicken", "Курицы ×5"), ("pig", "Свиньи ×3"), ("cow", "Корова ×1") })
         {
             var n = kind == "chicken" ? 5 : kind == "pig" ? 3 : 1;
             menu.AddMenuOption(label, (p, _) => { if (Has(p, "@css/cheats")) Server.ExecuteCommand($"css_spawnanimal {kind} {n} #{p.UserId}"); });
         }
-        menu.AddMenuOption("Убрать всех", (p, _) => { if (Has(p, "@css/cheats")) Server.ExecuteCommand("css_killanimals"); });
-        MenuManager.OpenChatMenu(caller, menu);
+        menu.AddMenuOption("Убрать всех животных", (p, _) => { if (Has(p, "@css/cheats")) Server.ExecuteCommand("css_killanimals"); });
+        menu.AddMenuOption("Очистить карту от гранат и хлама", (p, _) => { if (Has(p, "@css/cheats")) Server.ExecuteCommand("css_cleanup all"); });
+        Show(caller, menu);
     }
 
     // ---- очистка карты --------------------------------------------------------------------------------------------
