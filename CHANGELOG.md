@@ -4,9 +4,12 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: [S
 
 ## [Unreleased]
 
+### Changed
+- Repository renamed from `cs2-panel-plugin` (old GitHub URLs redirect).
+
 ## [0.6.0] - 2026-11-10
 
-First public release of the plugin (the version used by cs2-yc-sandbox).
+First public release of the plugin (the version used by cs2-server-admin-panel).
 
 ### Added
 - `!menu`: centre-screen menu with sections that depend on admin flags.

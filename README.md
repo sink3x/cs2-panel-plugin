@@ -1,13 +1,13 @@
-# cs2-panel-plugin
+# cs2-server-admin-plugin
 
-[![CI](https://github.com/sink3x/cs2-panel-plugin/actions/workflows/ci.yml/badge.svg)](https://github.com/sink3x/cs2-panel-plugin/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/sink3x/cs2-panel-plugin)](https://github.com/sink3x/cs2-panel-plugin/releases)
+[![CI](https://github.com/sink3x/cs2-server-admin-plugin/actions/workflows/ci.yml/badge.svg)](https://github.com/sink3x/cs2-server-admin-plugin/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/sink3x/cs2-server-admin-plugin)](https://github.com/sink3x/cs2-server-admin-plugin/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 English · [Русский](README.ru.md)
 
 A small [CounterStrikeSharp](https://github.com/roflmuffin/CounterStrikeSharp) plugin for Counter-Strike 2. It is the in-game half of
-**[cs2-yc-sandbox](https://github.com/sink3x/cs2-yc-sandbox)** (a cheap CS2 practice server with a web admin panel), but it works on any server that runs CounterStrikeSharp.
+**[cs2-server-admin-panel](https://github.com/sink3x/cs2-server-admin-panel)** (a cheap CS2 practice server with a web admin panel), but it works on any server that runs CounterStrikeSharp.
 
 - **`!menu`**: a centre-screen menu with sections (skins, team, practice, round and bots, maps, sounds, animals and cleanup). Sections depend on the player's admin flags.
 - **Sounds**: play a sound from a library on one player or on everybody.
@@ -22,11 +22,11 @@ A small [CounterStrikeSharp](https://github.com/roflmuffin/CounterStrikeSharp) p
 
 Requires a server with Metamod:Source and CounterStrikeSharp (API 1.0.379 or newer).
 
-1. Download `CS2Panel.zip` from the [latest release](https://github.com/sink3x/cs2-panel-plugin/releases/latest) and check it against `SHA256SUMS`.
+1. Download `CS2Panel.zip` from the [latest release](https://github.com/sink3x/cs2-server-admin-plugin/releases/latest) and check it against `SHA256SUMS`.
 2. Unpack so that the file ends up at `game/csgo/addons/counterstrikesharp/plugins/CS2Panel/CS2Panel.dll`.
 3. Restart the server or run `css_plugins load CS2Panel`.
 
-With the admin panel from cs2-yc-sandbox you do not install anything by hand: the panel ships this plugin and keeps its config files up to date.
+With the admin panel from cs2-server-admin-panel you do not install anything by hand: the panel ships this plugin and keeps its config files up to date.
 
 ## Commands
 

@@ -1,13 +1,13 @@
-# cs2-panel-plugin
+# cs2-server-admin-plugin
 
-[![CI](https://github.com/sink3x/cs2-panel-plugin/actions/workflows/ci.yml/badge.svg)](https://github.com/sink3x/cs2-panel-plugin/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/sink3x/cs2-panel-plugin)](https://github.com/sink3x/cs2-panel-plugin/releases)
+[![CI](https://github.com/sink3x/cs2-server-admin-plugin/actions/workflows/ci.yml/badge.svg)](https://github.com/sink3x/cs2-server-admin-plugin/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/sink3x/cs2-server-admin-plugin)](https://github.com/sink3x/cs2-server-admin-plugin/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 [English](README.md) · Русский
 
 Небольшой плагин [CounterStrikeSharp](https://github.com/roflmuffin/CounterStrikeSharp) для Counter-Strike 2. Это внутриигровая половина проекта
-**[cs2-yc-sandbox](https://github.com/sink3x/cs2-yc-sandbox)** (недорогой тренировочный сервер CS2 с веб-панелью), но он работает на любом сервере с CounterStrikeSharp.
+**[cs2-server-admin-panel](https://github.com/sink3x/cs2-server-admin-panel)** (недорогой тренировочный сервер CS2 с веб-панелью), но он работает на любом сервере с CounterStrikeSharp.
 
 - **`!menu`**: меню по центру экрана с разделами (скины, команда, тренировка, раунд и боты, карты, звуки, животные и очистка). Разделы зависят от прав игрока.
 - **Звуки**: проиграть звук из библиотеки одному игроку или всем.
@@ -22,11 +22,11 @@
 
 Нужен сервер с Metamod:Source и CounterStrikeSharp (API 1.0.379 или новее).
 
-1. Скачайте `CS2Panel.zip` из [последнего релиза](https://github.com/sink3x/cs2-panel-plugin/releases/latest) и сверьте с `SHA256SUMS`.
+1. Скачайте `CS2Panel.zip` из [последнего релиза](https://github.com/sink3x/cs2-server-admin-plugin/releases/latest) и сверьте с `SHA256SUMS`.
 2. Распакуйте так, чтобы файл лежал в `game/csgo/addons/counterstrikesharp/plugins/CS2Panel/CS2Panel.dll`.
 3. Перезапустите сервер или выполните `css_plugins load CS2Panel`.
 
-С панелью из cs2-yc-sandbox вручную ничего ставить не нужно: панель сама везёт этот плагин и обновляет его конфиги.
+С панелью из cs2-server-admin-panel вручную ничего ставить не нужно: панель сама везёт этот плагин и обновляет его конфиги.
 
 ## Команды
 

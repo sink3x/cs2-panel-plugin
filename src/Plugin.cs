@@ -20,7 +20,7 @@ public class CS2PanelPlugin : BasePlugin
     public override string ModuleName => "CS2Panel";
     public override string ModuleVersion => "0.6.0";
     public override string ModuleAuthor => "sink3x";
-    public override string ModuleDescription => "Panel companion: in-game !menu, sounds, team names/logos, clan tags, animals, map cleanup (cs2-yc-sandbox)";
+    public override string ModuleDescription => "Panel companion: in-game !menu, sounds, team names/logos, clan tags, animals, map cleanup (cs2-server-admin-panel)";
 
     private const double CooldownSeconds = 2.0;
     private DateTime _lastPlay = DateTime.MinValue;
