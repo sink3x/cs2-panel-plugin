@@ -33,7 +33,7 @@ jobs:
           ver="${GITHUB_REF_NAME#v}"
           awk -v v="$ver" '$0 ~ "^## \\["v"\\]" {p=1; next} /^## \[/ {p=0} p' CHANGELOG.md > notes.md
           [ -s notes.md ] || echo "Release $GITHUB_REF_NAME" > notes.md
-      - uses: actions/attest-build-provenance@v2
+      - uses: actions/attest-build-provenance@v4
         with:
           subject-path: CS2Panel.zip
       - name: Publish
